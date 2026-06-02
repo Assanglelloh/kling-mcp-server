@@ -108,6 +108,30 @@ def call_tool(name, args):
     except Exception as e:
         return {"error": str(e)}
 
+def handle_mcp(body):
+    method = body.get("method", "")
+    rid = body.get("id")
+    if method == "initialize":
+        return jsonify({
+            "jsonrpc": "2.0", "id": rid,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "kling-ai", "version": "1.0.0"}
+            }
+        })
+    elif method == "tools/list":
+        return jsonify({"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}})
+    elif method == "tools/call":
+        p = body.get("params", {})
+        result = call_tool(p.get("name"), p.get("arguments", {}))
+        return jsonify({
+            "jsonrpc": "2.0", "id": rid,
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
+            }
+        })
+    return jsonify({"jsonrpc": "2.0", "id": rid, "result": {}})
 
 @app.route("/.well-known/oauth-authorization-server")
 def oauth_meta():
@@ -158,6 +182,11 @@ def token():
 def health():
     return jsonify({"status": "ok"})
 
+@app.route("/", methods=["POST"])
+def root_post():
+    body = request.get_json(silent=True) or {}
+    return handle_mcp(body)
+
 @app.route("/sse", methods=["GET"])
 def sse():
     def stream():
@@ -170,30 +199,8 @@ def sse():
 
 @app.route("/messages", methods=["POST"])
 def messages():
-    body = request.get_json()
-    method = body.get("method", "")
-    rid = body.get("id")
-    if method == "initialize":
-        return jsonify({
-            "jsonrpc": "2.0", "id": rid,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "kling-ai", "version": "1.0.0"}
-            }
-        })
-    elif method == "tools/list":
-        return jsonify({"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}})
-    elif method == "tools/call":
-        p = body.get("params", {})
-        result = call_tool(p.get("name"), p.get("arguments", {}))
-        return jsonify({
-            "jsonrpc": "2.0", "id": rid,
-            "result": {
-                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
-            }
-        })
-    return jsonify({"jsonrpc": "2.0", "id": rid, "result": {}})
+    body = request.get_json(silent=True) or {}
+    return handle_mcp(body)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
