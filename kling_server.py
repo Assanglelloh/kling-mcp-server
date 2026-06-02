@@ -1,5 +1,5 @@
 """
-Kling AI MCP Server — HTTP/SSE version pour Railway
+Kling AI MCP Server — HTTP/SSE + OAuth stub pour Claude connectors
 """
 
 import jwt
@@ -7,7 +7,7 @@ import time
 import json
 import os
 import requests
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, redirect
 
 ACCESS_KEY = os.environ.get("KLING_ACCESS_KEY", "")
 SECRET_KEY = os.environ.get("KLING_SECRET_KEY", "")
@@ -130,6 +130,36 @@ def call_tool(name, arguments):
 
     except Exception as e:
         return {"error": str(e)}
+
+# ── OAuth 2.0 stub (requis par Claude connectors) ──────────────────────────
+
+@app.route("/.well-known/oauth-authorization-server")
+def oauth_metadata():
+    base = request.host_url.rstrip("/")
+    return jsonify({
+        "issuer": base,
+        "authorization_endpoint": f"{base}/authorize",
+        "token_endpoint": f"{base}/token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"]
+    })
+
+@app.route("/authorize")
+def authorize():
+    redirect_uri = request.args.get("redirect_uri", "")
+    state = request.args.get("state", "")
+    return redirect(f"{redirect_uri}?code=kling-ok&state={state}")
+
+@app.route("/token", methods=["POST"])
+def token():
+    return jsonify({
+        "access_token": "kling-static-token",
+        "token_type": "bearer",
+        "expires_in": 86400
+    })
+
+# ── MCP endpoints ──────────────────────────────────────────────────────────
 
 @app.route("/", methods=["GET"])
 def health():
