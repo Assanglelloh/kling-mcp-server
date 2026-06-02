@@ -10,6 +10,8 @@ SECRET_KEY = os.environ.get("KLING_SECRET_KEY", "")
 BASE_URL = "https://api.klingai.com"
 app = Flask(__name__)
 
+auth_codes = {}
+
 def get_token():
     now = int(time.time())
     payload = {"iss": ACCESS_KEY, "exp": now + 1800, "nbf": now - 5}
@@ -17,7 +19,7 @@ def get_token():
 
 def kh():
     return {
-        "Authorization": f"Bearer {get_token()}",
+        "Authorization": "Bearer " + get_token(),
         "Content-Type": "application/json"
     }
 
@@ -71,20 +73,11 @@ def call_tool(name, args):
                 "n": args.get("n", 2),
                 "aspect_ratio": args.get("aspect_ratio", "1:1")
             }
-            r = requests.post(
-                BASE_URL + "/v1/images/generations",
-                headers=kh(),
-                json=payload
-            )
+            r = requests.post(BASE_URL + "/v1/images/generations", headers=kh(), json=payload)
             d = r.json()
             if d.get("code") != 0:
                 return {"error": d.get("message")}
-            return {
-                "task_id": d["data"]["task_id"],
-                "message": "Utilise check_task dans 30-60s.",
-                "type": "image"
-            }
-
+            return {"task_id": d["data"]["task_id"], "message": "Utilise check_task dans 30-60s.", "type": "image"}
         elif name == "generate_video":
             payload = {
                 "model_name": "kling-v1",
@@ -93,25 +86,13 @@ def call_tool(name, args):
                 "aspect_ratio": args.get("aspect_ratio", "9:16"),
                 "mode": "std"
             }
-            r = requests.post(
-                BASE_URL + "/v1/videos/text2video",
-                headers=kh(),
-                json=payload
-            )
+            r = requests.post(BASE_URL + "/v1/videos/text2video", headers=kh(), json=payload)
             d = r.json()
             if d.get("code") != 0:
                 return {"error": d.get("message")}
-            return {
-                "task_id": d["data"]["task_id"],
-                "message": "Video en cours (2-5 min). Utilise check_task.",
-                "type": "video"
-            }
-
+            return {"task_id": d["data"]["task_id"], "message": "Video en cours (2-5 min). Utilise check_task.", "type": "video"}
         elif name == "check_task":
-            if args["type"] == "image":
-                ep = "/v1/images/generations"
-            else:
-                ep = "/v1/videos/text2video"
+            ep = "/v1/images/generations" if args["type"] == "image" else "/v1/videos/text2video"
             r = requests.get(BASE_URL + ep + "/" + args["task_id"], headers=kh())
             d = r.json()
             td = d.get("data", {})
@@ -124,7 +105,6 @@ def call_tool(name, args):
             elif st == "failed":
                 return {"status": "echec", "detail": td.get("task_status_msg", "")}
             return {"status": st, "message": "Encore en cours, reessaie dans 30s."}
-
     except Exception as e:
         return {"error": str(e)}
 
@@ -139,7 +119,8 @@ def oauth_meta():
         "registration_endpoint": b + "/register",
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
-        "code_challenge_methods_supported": ["S256"]
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "none"]
     })
 
 @app.route("/register", methods=["POST"])
@@ -152,22 +133,25 @@ def register():
         "redirect_uris": body.get("redirect_uris", []),
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
-        "token_endpoint_auth_method": "client_secret_post"
+        "token_endpoint_auth_method": "none"
     }), 201
 
 @app.route("/authorize")
 def authorize():
     redirect_uri = request.args.get("redirect_uri", "")
     state = request.args.get("state", "")
+    code = "kling-code-" + str(int(time.time()))
+    auth_codes[code] = {"redirect_uri": redirect_uri}
     sep = "&" if "?" in redirect_uri else "?"
-    return redirect(redirect_uri + sep + "code=kling-ok&state=" + state)
+    return redirect(redirect_uri + sep + "code=" + code + "&state=" + state)
 
 @app.route("/token", methods=["POST"])
 def token():
     return jsonify({
         "access_token": "kling-static-token",
         "token_type": "bearer",
-        "expires_in": 86400
+        "expires_in": 86400,
+        "scope": "tools"
     })
 
 @app.route("/", methods=["GET"])
@@ -189,7 +173,6 @@ def messages():
     body = request.get_json()
     method = body.get("method", "")
     rid = body.get("id")
-
     if method == "initialize":
         return jsonify({
             "jsonrpc": "2.0", "id": rid,
